@@ -1,5 +1,8 @@
 # Konflux-CI
 
+<!-- toc -->
+<!-- tocstop -->
+
 Integration and release of Konflux-CI
 
 ## Trying Out Konflux
