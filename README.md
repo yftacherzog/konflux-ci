@@ -2,7 +2,7 @@
 
 <!-- toc -->
 
-- [Trying Out KonfluxZ](#trying-out-konfluxz)
+- [Trying Out KonfluxZZ](#trying-out-konfluxzz)
   * [Machine Requirements](#machine-requirements)
   * [Installing Software Dependencies](#installing-software-dependencies)
   * [Bootstrapping the Cluster](#bootstrapping-the-cluster)
