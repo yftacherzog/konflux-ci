@@ -34,7 +34,7 @@
 
 Integration and release of Konflux-CI
 
-## Trying Out KonfluxZ
+## Trying Out KonfluxZZ
 
 This section demonstrates the process of deploying Konflux locally, onboarding users and
 building and releasing an application. This procedure emphasizes streamlined deployment.
