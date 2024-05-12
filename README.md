@@ -1,6 +1,35 @@
 # Konflux-CI
 
 <!-- toc -->
+
+- [Trying Out Konflux](#trying-out-konflux)
+  * [Machine Requirements](#machine-requirements)
+  * [Installing Software Dependencies](#installing-software-dependencies)
+  * [Bootstrapping the Cluster](#bootstrapping-the-cluster)
+  * [Enable Pipelines Triggering via Webhooks](#enable-pipelines-triggering-via-webhooks)
+  * [Onboard a new Application](#onboard-a-new-application)
+  * [Image Registry](#image-registry)
+  * [Creating a Pull Request](#creating-a-pull-request)
+  * [Observe the Behavior](#observe-the-behavior)
+  * [Pull your new Image](#pull-your-new-image)
+  * [Next Steps](#next-steps)
+- [Configuring Secrets](#configuring-secrets)
+  * [Github Application](#github-application)
+  * [Configuring a Push Secret for the Build Pipeline](#configuring-a-push-secret-for-the-build-pipeline)
+    + [Example - Extract Quay Push Secret:](#example---extract-quay-push-secret)
+  * [Configuring a Push Secret for the Release Pipeline](#configuring-a-push-secret-for-the-release-pipeline)
+- [Using Konflux](#using-konflux)
+  * [Create Application and Component](#create-application-and-component)
+  * [Create Integration Test for your Application](#create-integration-test-for-your-application)
+  * [Configure a Release Pipeline](#configure-a-release-pipeline)
+- [Namespace and User Management](#namespace-and-user-management)
+  * [Creating a new Namespace](#creating-a-new-namespace)
+  * [Granting a User Access to a Namespace](#granting-a-user-access-to-a-namespace)
+  * [Add a new User](#add-a-new-user)
+- [Troubleshooting Common Issues](#troubleshooting-common-issues)
+  * [PR changes are not Triggering Pipelines](#pr-changes-are-not-triggering-pipelines)
+  * [Setup Scripts or Pipeline Execution Fail](#setup-scripts-or-pipeline-execution-fail)
+
 <!-- tocstop -->
 
 Integration and release of Konflux-CI
