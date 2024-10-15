@@ -43,6 +43,9 @@ jobs:
         with:
           ref: "${{ github.event.pull_request.head.sha }}"
   
+      - name: Disable appArmor
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Create k8s Kind Cluster
         uses: helm/kind-action@v1
         with:
