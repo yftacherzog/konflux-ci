@@ -1,0 +1,46 @@
+# Post-run diagnostics: Konflux CR dump, generate-err-logs.sh, optional JUnit copy and artifact upload.
+#
+name: 'Operator E2E — logs'
+description: 'kubectl get konflux, generate-err-logs.sh, optional JUnit collect and upload-artifact.'
+inputs:
+  konflux-repo-root:
+    description: 'Absolute path to konflux-ci repository root.'
+    required: true
+  junit-report-path:
+    description: 'Path to JUnit XML from conformance (for Collect JUnit report step).'
+    required: false
+    default: ''
+  upload-artifact:
+    description: 'If true, upload logs directory as a workflow artifact.'
+    required: false
+    default: 'false'
+  artifact-name:
+    description: 'Artifact name when upload-artifact is true.'
+    required: false
+    default: 'logs-operator-e2e'
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate error logs
+      if: always()
+      shell: bash
+      run: bash "${{ inputs.konflux-repo-root }}/scripts/operator-e2e/collect-diagnostics.sh" "${{ inputs.konflux-repo-root }}"
+
+    - name: Collect JUnit report
+      if: always()
+      shell: bash
+      env:
+        JUNIT_SRC: ${{ inputs.junit-report-path }}
+      run: |
+        REPORT="${JUNIT_SRC}"
+        if [[ -z "$REPORT" ]]; then
+          REPORT="${{ github.workspace }}/junit-conformance.xml"
+        fi
+        bash "${{ inputs.konflux-repo-root }}/scripts/operator-e2e/collect-junit-to-logs.sh" "${{ inputs.konflux-repo-root }}" "$REPORT"
+
+    - name: Archive logs
+      if: ${{ always() && inputs.upload-artifact == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.konflux-repo-root }}/logs

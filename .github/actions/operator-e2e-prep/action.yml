@@ -1,0 +1,33 @@
+# Prepare runner for operator e2e: disk space, AppArmor, Go, kind, kubectl.
+# Run after checkout of konflux-ci. See operator-e2e-deploy / operator-e2e-tests / operator-e2e-logs.
+#
+name: 'Operator E2E — prep'
+description: 'Free disk (Ubuntu), AppArmor workaround, setup Go, install kind and kubectl.'
+inputs:
+  konflux-repo-root:
+    description: 'Absolute path to konflux-ci repository root.'
+    required: true
+  runner-arch:
+    description: 'amd64 or arm64 for kind/kubectl binaries.'
+    required: false
+    default: 'amd64'
+runs:
+  using: 'composite'
+  steps:
+    - name: Free disk and AppArmor (Ubuntu)
+      shell: bash
+      run: bash "${{ inputs.konflux-repo-root }}/scripts/operator-e2e/prep-free-disk-apparmor.sh"
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ inputs.konflux-repo-root }}/operator/go.mod
+        cache-dependency-path: ${{ inputs.konflux-repo-root }}/operator/go.sum
+
+    - name: Install kind and kubectl
+      shell: bash
+      env:
+        KIND_VERSION: '0.31.0'
+        KUBECTL_VERSION: '1.35.2'
+        ARCH: ${{ inputs.runner-arch }}
+      run: bash "${{ inputs.konflux-repo-root }}/scripts/operator-e2e/install-kind-kubectl.sh"

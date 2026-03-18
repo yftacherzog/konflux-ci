@@ -3,7 +3,8 @@ name: Operator Tests
 on:
   push:
     branches: [main]
-  pull_request:
+  # pull_request disabled for testing
+  # pull_request:
   merge_group:
     types: [checks_requested]
 

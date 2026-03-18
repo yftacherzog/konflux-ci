@@ -1,0 +1,191 @@
+# Prototype Task: deploy Konflux on a cluster whose kubeconfig is stored in a Secret
+# (e.g. created by tekton-integration-catalog kind-aws-provision), optional manifest
+# overrides, then operator integration + conformance scripts.
+#
+# Requires a ServiceAccount that can read the cluster-access Secret in this namespace.
+# fetch-kubeconfig: pinned task-runner. deploy-and-test: konflux-ci appstudio-utils (git/make/go/kubectl/jq/yq); kustomize wrapper for apply-overrides; python3 dnf-only if overrides set.
+#
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: konflux-ci-operator-e2e
+spec:
+  description: >-
+    Apply OVERRIDES_YAML (optional), run deploy-local.sh with DEPLOY_LOCAL_SKIP_KIND=1,
+    then scripts/operator-e2e/run-deploy-test-resources.sh, run-integration-tests.sh,
+    prepare-conformance-env.sh, and run-conformance-tests.sh.
+  volumes:
+    - name: e2e-shared
+      emptyDir: {}
+  workspaces:
+    - name: source
+      description: konflux-ci repository (git clone)
+  params:
+    - name: cluster-access-secret
+      description: Secret name containing kubeconfig (e.g. kfg-<pipelinerun name>)
+      type: string
+    - name: kubeconfig-secret-key
+      description: Key inside the Secret holding kubeconfig bytes
+      type: string
+      default: kubeconfig
+    - name: operator-image
+      description: Pullable operator image (OPERATOR_INSTALL_METHOD=local)
+      type: string
+    - name: overrides-yaml
+      description: >-
+        Optional apply-overrides-from-yaml body (empty to skip). Do not pass credentials or
+        other secrets; param values are stored on TaskRuns and may appear in UIs and debug output.
+      type: string
+      default: ""
+    - name: konflux-ready-timeout
+      type: string
+      default: "30m"
+    - name: konflux-cr-relative-path
+      type: string
+      default: operator/config/samples/konflux-e2e.yaml
+    - name: kind-cluster-name
+      description: Logical Kind cluster name for deploy-local.sh
+      type: string
+      default: konflux-operator-e2e
+    - name: release-ta-oci-storage
+      description: Optional; passed to prepare-conformance-env (e.g. trusted-artifacts OCI ref)
+      type: string
+      default: ""
+  stepTemplate:
+    volumeMounts:
+      - name: e2e-shared
+        mountPath: /mnt/e2e-shared
+  steps:
+    - name: fetch-kubeconfig
+      image: quay.io/konflux-ci/task-runner:0.2.0@sha256:ba65585f5c8b0a74dc51590e95961765322427d1d62ccd4eb742ff0442291985
+      env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        SECRET="$(params.cluster-access-secret)"
+        KEY="$(params.kubeconfig-secret-key)"
+        # Try primary key, then common alternates from provision tasks
+        for k in "$KEY" kubeconfig config value KUBECONFIG; do
+          if kubectl get secret "$SECRET" -n "$POD_NAMESPACE" -o "jsonpath={.data.${k}}" 2>/dev/null | base64 -d > /mnt/e2e-shared/kubeconfig 2>/dev/null; then
+            if [[ -s /mnt/e2e-shared/kubeconfig ]]; then
+              echo "Cluster kubeconfig written to shared volume (do not log file contents)."
+              chmod 600 /mnt/e2e-shared/kubeconfig
+              exit 0
+            fi
+          fi
+        done
+        echo "Could not decode non-empty kubeconfig from secret ${SECRET} in namespace ${POD_NAMESPACE}." >&2
+        if kubectl get secret "$SECRET" -n "$POD_NAMESPACE" -o name >/dev/null 2>&1; then
+          echo "Secret exists; kubectl describe (metadata and key sizes only, not values):" >&2
+          kubectl describe secret "$SECRET" -n "$POD_NAMESPACE" >&2 || true
+        else
+          echo "Secret not found or not readable with current RBAC." >&2
+        fi
+        exit 1
+    - name: deploy-and-test
+      # Mount path is substituted reliably on this field; $(workspaces.source.path) inside script can be
+      # left literal so bash treats it as command substitution → empty ROOT → wrong cwd (see deploy-local.sh missing).
+      workingDir: $(workspaces.source.path)
+      # Same family as build-definitions source-build/show-sbom; pin digest. Image has golang/make/git/jq/yq/oc+kubectl — not standalone kustomize (wrapper below).
+      image: quay.io/konflux-ci/appstudio-utils:1610c1fc4cfc9c9053dbefc1146904a4df6659ef@sha256:90ac97b811073cb99a23232c15a08082b586c702b85da6200cf54ef505e3c50c
+      env:
+        - name: GITHUB_APP_ID
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: GITHUB_APP_ID
+        - name: GITHUB_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: GITHUB_PRIVATE_KEY
+        - name: WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: WEBHOOK_SECRET
+        - name: QUAY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: QUAY_TOKEN
+        - name: QUAY_ORGANIZATION
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: QUAY_ORGANIZATION
+        - name: SMEE_CHANNEL
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: SMEE_CHANNEL
+        - name: GH_ORG
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: GH_ORG
+        - name: GH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: GH_TOKEN
+        - name: QUAY_DOCKERCONFIGJSON
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: QUAY_DOCKERCONFIGJSON
+        - name: RELEASE_CATALOG_TA_QUAY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: konflux-operator-e2e-credentials
+              key: RELEASE_CATALOG_TA_QUAY_TOKEN
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        OVERRIDES="$(params.overrides-yaml)"
+        if [[ -n "${OVERRIDES// }" ]] && ! command -v python3 >/dev/null 2>&1; then
+          dnf install -y python3 >/dev/null
+        fi
+        # appstudio-utils has no standalone kustomize; apply-overrides uses `kustomize build` — map to kubectl's embedded kustomize.
+        if ! command -v kustomize >/dev/null 2>&1; then
+          kustomize() {
+            if [[ "${1:-}" != build ]]; then
+              echo "kustomize wrapper: only \"kustomize build <dir>\" is supported (uses kubectl-embedded kustomize)" >&2
+              return 1
+            fi
+            shift
+            kubectl kustomize "$@"
+          }
+          export -f kustomize
+        fi
+        export KUBECONFIG=/mnt/e2e-shared/kubeconfig
+        kubectl config current-context
+        ROOT="$(pwd)"
+        export DEPLOY_LOCAL_SKIP_KIND=1
+        export KIND_CLUSTER="$(params.kind-cluster-name)"
+        export OPERATOR_INSTALL_METHOD=local
+        export OPERATOR_IMAGE="$(params.operator-image)"
+        export KONFLUX_CR="$(params.konflux-cr-relative-path)"
+        export KONFLUX_READY_TIMEOUT="$(params.konflux-ready-timeout)"
+        export CONTAINER_TOOL=podman
+        export RELEASE_TA_OCI_STORAGE="$(params.release-ta-oci-storage)"
+        if [[ -n "${OVERRIDES// }" ]]; then
+          export OVERRIDES_YAML="${OVERRIDES}"
+          bash scripts/operator-e2e/apply-overrides-from-yaml.sh "$ROOT"
+        fi
+        ./scripts/deploy-local.sh
+        bash scripts/operator-e2e/post-deploy-sanity.sh "$ROOT" || true
+        export SKIP_SAMPLE_COMPONENTS=true
+        bash scripts/operator-e2e/run-deploy-test-resources.sh "$ROOT"
+        bash scripts/operator-e2e/run-integration-tests.sh "$ROOT"
+        eval "$(bash scripts/operator-e2e/prepare-conformance-env.sh "$ROOT")"
+        export GITHUB_TOKEN="${GH_TOKEN:-}"
+        export MY_GITHUB_ORG="${GH_ORG:-}"
+        export QUAY_TOKEN=""
+        export E2E_APPLICATIONS_NAMESPACE=user-ns2
+        JUNIT="${ROOT}/junit-conformance.xml"
+        bash scripts/operator-e2e/run-conformance-tests.sh "$ROOT" "$JUNIT"

@@ -1,0 +1,69 @@
+# PAC PipelineRun: operator deploy + E2E on Kind (AWS) — prototype.
+# Apply Task + Pipeline to the namespace first (see .tekton/README.md).
+#
+# Requires a prior build of the operator image for the same revision (e.g. build
+# PipelineRun) or set param operator-image to any pullable tag that matches your test plan.
+#
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://github.com/konflux-ci/konflux-ci?rev={{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "2"
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "pull_request" && target_branch == "main" ||
+      event == "push" && target_branch.startsWith("gh-readonly-queue/main/")
+  creationTimestamp: null
+  labels:
+    appstudio.openshift.io/application: konflux-operator
+    appstudio.openshift.io/component: konflux-operator
+    pipelines.appstudio.openshift.io/type: test
+  name: konflux-operator-e2e-on-pull-request
+  namespace: konflux-vanguard-tenant
+spec:
+  params:
+    - name: git-url
+      value: '{{source_url}}'
+    - name: revision
+      value: '{{revision}}'
+    # Same tag as `konflux-operator-on-pull-request` param `output-image` (parallel build). Remote Kind must pull this ref.
+    - name: operator-image
+      value: quay.io/redhat-user-workloads/konflux-vanguard-tenant/konflux-operator:on-pr-{{revision}}
+    - name: overrides-yaml
+      value: ""
+    - name: konflux-ready-timeout
+      value: 30m
+    # OCI artifact prefix for kind-aws provision/deprovision (tag = PipelineRun name). Robot in konflux-test-infra must push here.
+    - name: oci-container-repo
+      value: quay.io/konflux-vanguard/konflux-operator-e2e-artifacts
+    - name: konflux-test-infra-secret
+      value: konflux-test-infra
+    - name: aws-credentials-secret
+      value: konflux-mapt-us-east-1
+    - name: deprovision-aws-credentials-secret
+      value: konflux-mapt-us-east-1
+    - name: release-ta-oci-storage
+      value: ""
+  pipelineRef:
+    name: operator-e2e-pipeline
+  taskRunTemplate:
+    # kind-aws provision creates/patches Secret kfg-<PipelineRun name>; konflux-integration-runner has secrets create/patch (build-pipeline-* SAs do not).
+    serviceAccountName: konflux-integration-runner
+  workspaces:
+    - name: git-auth
+      secret:
+        secretName: '{{ git_auth_secret }}'
+    - name: source
+      # Shared across clone-repository and konflux-operator-e2e TaskRuns; emptyDir is pod-scoped and loses cloned repo between tasks.
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+status: {}

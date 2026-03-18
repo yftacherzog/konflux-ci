@@ -1,0 +1,79 @@
+# Composite action: full operator e2e (prep → deploy → tests → logs).
+# Same inputs as before; implemented by chaining operator-e2e-prep, operator-e2e-deploy,
+# operator-e2e-tests, operator-e2e-logs. For clearer GitHub UI, call those actions separately in your workflow.
+#
+# Required env: GITHUB_APP_ID, GITHUB_PRIVATE_KEY, WEBHOOK_SECRET, QUAY_TOKEN, QUAY_ORGANIZATION,
+# GH_ORG, GH_TOKEN, QUAY_DOCKERCONFIGJSON, RELEASE_CATALOG_TA_QUAY_TOKEN, SMEE_CHANNEL.
+# Optional: RELEASE_TA_OCI_STORAGE
+#
+name: 'Run Operator E2E'
+description: 'Full flow: prep, deploy Kind+Konflux, integration+conformance tests, diagnostics. Chains split actions.'
+inputs:
+  konflux-ci-ref:
+    description: 'Branch, tag, or SHA of konflux-ci/konflux-ci to run. Ignored when working-directory is set.'
+    required: false
+    default: 'main'
+  working-directory:
+    description: 'If set, use as konflux-ci repo root (no checkout). Use from konflux-ci CI with github.workspace.'
+    required: false
+    default: ''
+  overrides:
+    description: 'YAML: name, git:[rules], images:[]. Each rule: sourceRepo + remote or localPath.'
+    required: false
+    default: ''
+  runner-arch:
+    description: 'Runner arch for kind/kubectl (amd64 or arm64).'
+    required: false
+    default: 'amd64'
+  konflux-ready-timeout:
+    description: 'Max time to wait for Konflux CR Ready (e.g. 15m, 30m).'
+    required: false
+    default: '15m'
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout konflux-ci
+      if: ${{ inputs.working-directory == '' }}
+      uses: actions/checkout@v4
+      with:
+        repository: konflux-ci/konflux-ci
+        ref: ${{ inputs.konflux-ci-ref }}
+        path: konflux-ci
+
+    - name: Set REPO_ROOT
+      id: repo-root
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.working-directory }}" ]]; then
+          echo "path=${{ inputs.working-directory }}" >> $GITHUB_OUTPUT
+        else
+          echo "path=${{ github.workspace }}/konflux-ci" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Prep
+      uses: ./.github/actions/operator-e2e-prep
+      with:
+        konflux-repo-root: ${{ steps.repo-root.outputs.path }}
+        runner-arch: ${{ inputs.runner-arch }}
+
+    - name: Deploy
+      uses: ./.github/actions/operator-e2e-deploy
+      with:
+        konflux-repo-root: ${{ steps.repo-root.outputs.path }}
+        overrides: ${{ inputs.overrides }}
+        konflux-ready-timeout: ${{ inputs.konflux-ready-timeout }}
+
+    - name: Tests
+      if: success()
+      uses: ./.github/actions/operator-e2e-tests
+      with:
+        konflux-repo-root: ${{ steps.repo-root.outputs.path }}
+        junit-report-path: ${{ github.workspace }}/junit-conformance.xml
+
+    - name: Logs
+      if: always()
+      uses: ./.github/actions/operator-e2e-logs
+      with:
+        konflux-repo-root: ${{ steps.repo-root.outputs.path }}
+        junit-report-path: ${{ github.workspace }}/junit-conformance.xml
+        upload-artifact: 'false'

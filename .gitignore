@@ -1,3 +1,6 @@
+# Temporary copy of upstream-kustomizations used by apply-overrides.sh (workflow only; repo kustomizations unchanged)
+.tmp/
+
 # Top-level logs output only (e.g. generate-err-logs); do not ignore test/go-tests/pkg/logs (Go package)
 /logs/
 .vscode/

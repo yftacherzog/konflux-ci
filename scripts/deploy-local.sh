@@ -9,9 +9,11 @@
 #
 # What this script does:
 #  1. Creates a Kind cluster with proper configuration
-#  2. Deploys the Konflux operator
-#  3. Applies a Konflux CR configuration
-#  4. Creates secrets for GitHub integration
+#  1b. Optionally loads local images (KIND_LOAD_IMAGES in deploy-local.env)
+#  2. Deploys dependencies (Tekton, etc.)
+#  3. Deploys the Konflux operator
+#  4. Applies a Konflux CR configuration
+#  5. Creates secrets for GitHub integration
 #
 # Prerequisites:
 #  - kind, kubectl, podman (or docker)
@@ -39,6 +41,11 @@
 #   build             - Build operator image locally and install (for operator developers)
 #   none              - Skip operator install and Konflux CR (for running operator locally)
 #
+# Optional manifest overrides (KONFLUX_OVERRIDES_YAML_PATH in deploy-local.env):
+#   Runs scripts/operator-e2e/apply-overrides-from-yaml.sh before operator build/deploy
+#   when OPERATOR_INSTALL_METHOD is local, build, or none. Ignored (with warning) for
+#   release. Requires yq, jq, kustomize, python3.
+#
 # NOTE: The 'local' method applies manifests from your checkout with the latest
 # released image, which may cause mismatches if your checkout differs from the
 # release. To avoid this, checkout a specific release tag first:
@@ -48,6 +55,10 @@
 # For 'none' method, the script sets up Kind + dependencies + secrets, then exits.
 # You then run the operator yourself:
 #   cd operator && make install && make run
+#
+# Remote / pre-provisioned cluster (e.g. Tekton kind-aws-provision):
+#   DEPLOY_LOCAL_SKIP_KIND=1 — skip local Kind creation and skip kind load of images.
+#   Use a pullable OPERATOR_IMAGE with OPERATOR_INSTALL_METHOD=local when the cluster cannot load local images.
 
 set -euo pipefail
 
@@ -79,9 +90,10 @@ INCREASE_PODMAN_PIDS_LIMIT="${INCREASE_PODMAN_PIDS_LIMIT:-1}"
 ENABLE_IMAGE_CACHE="${ENABLE_IMAGE_CACHE:-0}"
 OPERATOR_INSTALL_METHOD="${OPERATOR_INSTALL_METHOD:-release}"
 OPERATOR_IMAGE="${OPERATOR_IMAGE:-quay.io/konflux-ci/konflux-operator:latest}"
+KONFLUX_READY_TIMEOUT="${KONFLUX_READY_TIMEOUT:-15m}"
 
 # Export variables for child scripts
-export KIND_CLUSTER KIND_MEMORY_GB PODMAN_MACHINE_NAME REGISTRY_HOST_PORT ENABLE_REGISTRY_PORT
+export KIND_CLUSTER KIND_MEMORY_GB PODMAN_MACHINE_NAME REGISTRY_HOST_PORT ENABLE_REGISTRY_PORT KIND_LOAD_IMAGES
 export INCREASE_PODMAN_PIDS_LIMIT ENABLE_IMAGE_CACHE
 export GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_PATH GITHUB_APP_ID WEBHOOK_SECRET QUAY_TOKEN QUAY_ORGANIZATION QUAY_API_URL
 export SEGMENT_WRITE_KEY
@@ -108,6 +120,100 @@ echo ""
 
 INSTALL_METHOD="${OPERATOR_INSTALL_METHOD:-local}"
 
+# Ensure a namespace exists: in 'none' mode, pre-create it immediately;
+# otherwise wait up to 60 s for the operator to create it.
+# Usage: wait_or_create_namespace <namespace> <install_method>
+# Returns 0 on success, 1 if the namespace was not found in time.
+wait_or_create_namespace() {
+    local ns="$1"
+    local method="$2"
+    if [ "${method}" = "none" ]; then
+        echo "Pre-creating namespace: ${ns}"
+        kubectl create namespace "${ns}" --dry-run=client -o yaml | kubectl apply -f -
+    else
+        echo "Waiting for namespace: ${ns}"
+        local timeout=60
+        while ! kubectl get namespace "${ns}" &> /dev/null && [ $timeout -gt 0 ]; do
+            sleep 2
+            timeout=$((timeout - 2))
+        done
+        if [ $timeout -le 0 ]; then
+            echo "WARNING: Namespace ${ns} not created after 60 seconds"
+            return 1
+        fi
+    fi
+}
+
+# Load locally available container images into the Kind node (after the cluster exists).
+# KIND_LOAD_IMAGES: space- and/or comma-separated image references. Each must already
+# exist in Docker (docker image inspect) or Podman (podman image inspect).
+kind_load_images_from_env() {
+    if [ -z "${KIND_LOAD_IMAGES:-}" ]; then
+        return 0
+    fi
+    local cluster="${KIND_CLUSTER:-konflux}"
+    local line entry
+    echo "========================================="
+    echo "Step 1b: Loading images into Kind ('${cluster}')"
+    echo "========================================="
+    # Normalize commas to spaces for splitting
+    line="${KIND_LOAD_IMAGES//,/ }"
+    for entry in ${line}; do
+        if [ -z "${entry}" ]; then
+            continue
+        fi
+        echo "Loading image: ${entry}"
+        if command -v docker >/dev/null 2>&1 && docker image inspect "${entry}" >/dev/null 2>&1; then
+            kind load docker-image "${entry}" --name "${cluster}"
+        elif command -v podman >/dev/null 2>&1 && podman image inspect "${entry}" >/dev/null 2>&1; then
+            podman save "${entry}" -o - | kind load image-archive - --name "${cluster}"
+        else
+            echo "ERROR: Local image not found: ${entry}" >&2
+            echo "  It must exist in Docker or Podman before deploy-local.sh runs." >&2
+            echo "  Example: docker pull quay.io/konflux-ci/segment-bridge:<tag>" >&2
+            echo "           docker tag quay.io/konflux-ci/segment-bridge:<tag> dev.local/segment-bridge:test" >&2
+            echo "  Use the same reference in KIND_LOAD_IMAGES and in overrides image.replacement." >&2
+            exit 1
+        fi
+    done
+    echo ""
+}
+
+# Optional: git/image overrides for operator manifests (same schema as operator E2E).
+# Must run before "build" (embedded manifests) and before "local" make deploy.
+if [[ -n "${KONFLUX_OVERRIDES_YAML_PATH:-}" ]]; then
+    if [[ "${INSTALL_METHOD}" == "release" ]]; then
+        echo ""
+        echo "WARNING: KONFLUX_OVERRIDES_YAML_PATH is set but OPERATOR_INSTALL_METHOD=release"
+        echo "         installs upstream install.yaml; overrides to operator/pkg/manifests do not"
+        echo "         affect that install. Use build, local, or none to apply overrides."
+        echo ""
+    else
+        _resolved_overrides="${KONFLUX_OVERRIDES_YAML_PATH}"
+        if [[ "${_resolved_overrides}" != /* ]]; then
+            _resolved_overrides="${REPO_ROOT}/${_resolved_overrides}"
+        fi
+        if [[ ! -f "${_resolved_overrides}" ]]; then
+            echo "ERROR: KONFLUX_OVERRIDES_YAML_PATH file not found: ${_resolved_overrides}" >&2
+            exit 1
+        fi
+        for _cmd in yq jq kustomize python3; do
+            if ! command -v "${_cmd}" >/dev/null 2>&1; then
+                echo "ERROR: '${_cmd}' is required when KONFLUX_OVERRIDES_YAML_PATH is set." >&2
+                exit 1
+            fi
+        done
+        echo "========================================="
+        echo "Applying manifest overrides (KONFLUX_OVERRIDES_YAML_PATH)"
+        echo "========================================="
+        echo "File: ${_resolved_overrides}"
+        OVERRIDES_YAML_PATH="${_resolved_overrides}" \
+            KONFLUX_READY_TIMEOUT="${KONFLUX_READY_TIMEOUT}" \
+            bash "${SCRIPT_DIR}/operator-e2e/apply-overrides-from-yaml.sh" "${REPO_ROOT}"
+        echo ""
+    fi
+fi
+
 # For 'build' method, build the operator image before creating the cluster to reduce peak memory (no Kind container during go build)
 if [ "${INSTALL_METHOD}" = "build" ]; then
     echo "========================================="
@@ -120,11 +226,19 @@ if [ "${INSTALL_METHOD}" = "build" ]; then
     echo ""
 fi
 
-# Step 1: Setup Kind cluster
-echo "========================================="
-echo "Step 1: Creating Kind cluster"
-echo "========================================="
-"${SCRIPT_DIR}/setup-kind-local-cluster.sh"
+# Step 1: Setup Kind cluster (skip when using an existing kubeconfig, e.g. Tekton kind-aws-provision)
+if [ "${DEPLOY_LOCAL_SKIP_KIND:-0}" = "1" ]; then
+    echo "========================================="
+    echo "Step 1: Skipped (DEPLOY_LOCAL_SKIP_KIND=1 — using current KUBECONFIG)"
+    echo "========================================="
+else
+    echo "========================================="
+    echo "Step 1: Creating Kind cluster"
+    echo "========================================="
+    "${SCRIPT_DIR}/setup-kind-local-cluster.sh"
+
+    kind_load_images_from_env
+fi
 
 # Step 2: Deploy dependencies
 echo ""
@@ -170,9 +284,13 @@ case "${INSTALL_METHOD}" in
         ;;
 
     build)
-        echo "Loading operator image into Kind cluster..."
         cd "${REPO_ROOT}/operator"
-        kind load docker-image "${OPERATOR_IMG}" --name "${KIND_CLUSTER}"
+        if [ "${DEPLOY_LOCAL_SKIP_KIND:-0}" = "1" ]; then
+            echo "Skipping kind load (DEPLOY_LOCAL_SKIP_KIND=1); cluster must pull ${OPERATOR_IMG}"
+        else
+            echo "Loading operator image into Kind cluster..."
+            kind load docker-image "${OPERATOR_IMG}" --name "${KIND_CLUSTER}"
+        fi
 
         echo "Installing CRDs..."
         make install
@@ -255,9 +373,9 @@ if [ "${INSTALL_METHOD}" != "none" ]; then
     echo "========================================="
     echo "This may take several minutes..."
 
-    if ! kubectl wait --for=condition=Ready=True konflux konflux --timeout=15m 2>/dev/null; then
+    if ! kubectl wait --for=condition=Ready=True konflux konflux --timeout="${KONFLUX_READY_TIMEOUT}" 2>/dev/null; then
         echo ""
-        echo "WARNING: Konflux CR did not become Ready within 15 minutes"
+        echo "WARNING: Konflux CR did not become Ready within ${KONFLUX_READY_TIMEOUT}"
         echo "         This may be normal if deploying all components"
         echo "         Check status with: kubectl get konflux konflux -o yaml"
         echo ""

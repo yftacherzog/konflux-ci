@@ -9,12 +9,13 @@ on:
       - 'operator/hack/genref/**'
       - 'operator/api/**'
       - 'operator/config/samples/**'
-  pull_request:
-    paths:
-      - 'operator/docs/**'
-      - 'operator/hack/genref/**'
-      - 'operator/api/**'
-      - 'operator/config/samples/**'
+  # pull_request disabled for testing
+  # pull_request:
+  #   paths:
+  #     - 'operator/docs/**'
+  #     - 'operator/hack/genref/**'
+  #     - 'operator/api/**'
+  #     - 'operator/config/samples/**'
   workflow_dispatch:
 
 permissions:

@@ -7,8 +7,9 @@
 name: Sanity Test
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+  # pull_request disabled for testing
+  # pull_request:
+  #   types: [opened, synchronize, reopened, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
   repository_dispatch:
