@@ -1,0 +1,153 @@
+# Reusable composite action: run Konflux operator e2e tests.
+#
+# Uses the same flow as .github/workflows/operator-test-e2e.yaml: deploy deps,
+# deploy operator (build method), deploy test resources, run integration tests
+# and conformance e2e. Konflux CR and test scope are fixed (same as in-repo workflow).
+#
+# Required env (secrets from caller): GITHUB_APP_ID, GITHUB_PRIVATE_KEY, WEBHOOK_SECRET,
+# QUAY_TOKEN, QUAY_ORGANIZATION, GH_ORG, GH_TOKEN, QUAY_DOCKERCONFIGJSON,
+# RELEASE_CATALOG_TA_QUAY_TOKEN, SMEE_CHANNEL (for e2e).
+#
+name: 'Run Operator E2E'
+description: 'Deploy Konflux on Kind and run operator e2e tests (integration + conformance). Uses repo defaults for Konflux CR and test scope.'
+inputs:
+  konflux-ci-ref:
+    description: 'Branch, tag, or SHA of konflux-ci/konflux-ci to run. Ignored when working-directory is set.'
+    required: false
+    default: 'main'
+  working-directory:
+    description: 'If set, use this as konflux-ci repo root (no checkout). Use from konflux-ci CI with github.workspace.'
+    required: false
+    default: ''
+  ref-overrides:
+    description: 'JSON object of component name -> git revision to override (e.g. {"release-service":"abc123"}).'
+    required: false
+    default: '{}'
+  image-overrides:
+    description: 'Multiline: one per line "released_image|output_image" (e.g. quay.io/konflux-ci/segment-bridge|quay.io/org/segment-bridge:on-pr-xyz). Entries using digest in kustomization are replaced with newTag.'
+    required: false
+    default: ''
+  runner-arch:
+    description: 'Runner arch for kind/kubectl (amd64 or arm64).'
+    required: false
+    default: 'amd64'
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout konflux-ci
+      if: ${{ inputs.working-directory == '' }}
+      uses: actions/checkout@v4
+      with:
+        repository: konflux-ci/konflux-ci
+        ref: ${{ inputs.konflux-ci-ref }}
+        path: konflux-ci
+
+    - name: Set REPO_ROOT
+      id: repo-root
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.working-directory }}" ]]; then
+          echo "path=${{ inputs.working-directory }}" >> $GITHUB_OUTPUT
+        else
+          echo "path=${{ github.workspace }}/konflux-ci" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Apply ref and image overrides
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      env:
+        REF_OVERRIDES: ${{ inputs.ref-overrides }}
+        IMAGE_OVERRIDES: ${{ inputs.image-overrides }}
+      run: |
+        if [[ -n "${{ inputs.ref-overrides }}" && "${{ inputs.ref-overrides }}" != "{}" ]] || [[ -n "${{ inputs.image-overrides }}" ]]; then
+          bash .github/actions/run-operator-e2e/apply-overrides.sh "$(pwd)"
+        fi
+
+    - name: Free Disk Space (Ubuntu)
+      shell: bash
+      run: |
+        if command -v sudo &>/dev/null; then
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+        fi
+
+    - name: Disable AppArmor
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ steps.repo-root.outputs.path }}/operator/go.mod
+        cache-dependency-path: ${{ steps.repo-root.outputs.path }}/operator/go.sum
+
+    - name: Install kind and kubectl
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      env:
+        KIND_VERSION: '0.31.0'
+        KUBECTL_VERSION: '1.35.2'
+        ARCH: ${{ inputs.runner-arch }}
+      run: |
+        curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-${ARCH}"
+        chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+        curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl"
+        chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+
+    - name: Deploy Konflux using deploy-local.sh
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      env:
+        KIND_CLUSTER: konflux-operator-e2e
+        OPERATOR_INSTALL_METHOD: build
+        KONFLUX_CR: operator/config/samples/konflux-e2e.yaml
+      run: ./scripts/deploy-local.sh
+
+    - name: Restore operator/pkg/manifests (keep repo unchanged)
+      if: always()
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      run: |
+        BACKUP="${{ steps.repo-root.outputs.path }}/.tmp/manifests-backup"
+        if [[ -d "$BACKUP" ]]; then
+          rm -rf operator/pkg/manifests
+          cp -r "$BACKUP" operator/pkg/manifests
+          echo "Restored operator/pkg/manifests from backup"
+        fi
+
+    - name: Deploy test resources
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      env:
+        SKIP_SAMPLE_COMPONENTS: 'true'
+      run: ./deploy-test-resources.sh
+
+    - name: Run integration tests
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}/test/go-tests
+      run: go test . ./pkg/...
+
+    - name: Set e2e env and run conformance tests
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      env:
+        GH_ORG: ${{ env.GH_ORG }}
+        GH_TOKEN: ${{ env.GH_TOKEN }}
+        GITHUB_TOKEN: ${{ env.GH_TOKEN }}
+        MY_GITHUB_ORG: ${{ env.GH_ORG }}
+        QUAY_DOCKERCONFIGJSON: ${{ env.QUAY_DOCKERCONFIGJSON }}
+        RELEASE_CATALOG_TA_QUAY_TOKEN: ${{ env.RELEASE_CATALOG_TA_QUAY_TOKEN }}
+        E2E_APPLICATIONS_NAMESPACE: user-ns2
+      run: |
+        grep 'RELEASE_SERVICE_CATALOG_REVISION=' test/e2e/release-service-catalog-revision | sed 's/^export //' >> $GITHUB_ENV
+        BUNDLE=$(yq eval-all 'select(.kind == "ConfigMap" and .metadata.name == "build-pipeline-config") | .data["config.yaml"]' operator/pkg/manifests/build-service/manifests.yaml | yq eval '.pipelines[] | select(.name == "docker-build-oci-ta-min") | .bundle' -)
+        echo "CUSTOM_DOCKER_BUILD_OCI_TA_MIN_PIPELINE_BUNDLE=$BUNDLE" >> $GITHUB_ENV
+        cd test/go-tests && go test ./tests/conformance -v -timeout 30m -ginkgo.vv -ginkgo.github-output -ginkgo.junit-report="${{ github.workspace }}/junit-conformance.xml"
+
+    - name: Generate error logs
+      if: always()
+      shell: bash
+      working-directory: ${{ steps.repo-root.outputs.path }}
+      run: |
+        kubectl get konflux konflux -o yaml || true
+        ./generate-err-logs.sh || true
