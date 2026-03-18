@@ -386,10 +386,12 @@ spec:
             description: ReleasePlanAdmissionSpec defines the desired state of ReleasePlanAdmission.
             properties:
               applications:
-                description: Applications is a list of references to applications
-                  to be released in the managed namespace
+                description: |-
+                  Applications is a list of references to applications to be released in the managed namespace.
+                  Either applications or componentGroups must be specified, but not both.
                 items:
                   type: string
+                minItems: 1
                 type: array
               collectors:
                 description: Collectors contains all the information of the collectors
@@ -451,6 +453,14 @@ spec:
                 required:
                 - items
                 type: object
+              componentGroups:
+                description: |-
+                  ComponentGroups is a list of references to component groups to be released in the managed namespace.
+                  Either applications or componentGroups must be specified, but not both.
+                items:
+                  type: string
+                minItems: 1
+                type: array
               data:
                 description: Data is an unstructured key used for providing data for
                   the managed Release Pipeline
@@ -470,6 +480,13 @@ spec:
                 description: Pipeline contains all the information about the managed
                   Pipeline
                 properties:
+                  maxRetries:
+                    description: |-
+                      MaxRetries sets the retry limit for the pipeline overriding the value in
+                      ReleaseServiceConfig when specified. When unset the ReleaseServiceConfig
+                      value is used and 0 disables retries for the pipeline.
+                    minimum: 0
+                    type: integer
                   pipelineRef:
                     description: PipelineRef is the reference to the Pipeline
                     properties:
@@ -501,6 +518,12 @@ spec:
                         description: Resolver is the name of a Tekton resolver to
                           be used (e.g. git)
                         type: string
+                      useEmptyDir:
+                        description: |-
+                          UseEmptyDir specifies whether to use an empty dir volume for the workspace.
+                          When true, the PipelineRun will use an empty dir volume. Otherwise, it will
+                          use a volume claim template by default.
+                        type: boolean
                     required:
                     - params
                     - resolver
@@ -855,6 +878,18 @@ spec:
                               description: HostNetwork specifies whether the pod may
                                 use the node network namespace
                               type: boolean
+                            hostUsers:
+                              description: |-
+                                HostUsers indicates whether the pod will use the host's user namespace.
+                                Optional: Default to true.
+                                If set to true or not present, the pod will be run in the host user namespace, useful
+                                for when the pod needs a feature only available to the host user namespace, such as
+                                loading a kernel module with CAP_SYS_MODULE.
+                                When set to false, a new user namespace is created for the pod. Setting false
+                                is useful to mitigating container breakout vulnerabilities such as allowing
+                                containers to run as root without their user having root privileges on the host.
+                                This field depends on the kubernetes feature gate UserNamespacesSupport being enabled.
+                              type: boolean
                             imagePullSecrets:
                               description: ImagePullSecrets gives the name of the
                                 secret used by the pod to pull the image if specified
@@ -933,9 +968,10 @@ spec:
                                   operator:
                                     description: |-
                                       Operator represents a key's relationship to the value.
-                                      Valid operators are Exists and Equal. Defaults to Equal.
+                                      Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                                       Exists is equivalent to wildcard for value, so that a pod can
                                       tolerate all taints of a particular category.
+                                      Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                                     type: string
                                   tolerationSeconds:
                                     description: |-
@@ -1325,10 +1361,12 @@ spec:
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
             required:
-            - applications
             - origin
             - policy
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of applications or componentGroups must be specified
+              rule: has(self.applications) != has(self.componentGroups)
           status:
             description: ReleasePlanAdmissionStatus defines the observed state of
               ReleasePlanAdmission.
@@ -1437,6 +1475,9 @@ spec:
     - jsonPath: .spec.application
       name: Application
       type: string
+    - jsonPath: .spec.componentGroup
+      name: ComponentGroup
+      type: string
     - jsonPath: .spec.target
       name: Target
       type: string
@@ -1466,8 +1507,10 @@ spec:
             description: ReleasePlanSpec defines the desired state of ReleasePlan.
             properties:
               application:
-                description: Application is a reference to the application to be released
-                  in the managed namespace
+                description: |-
+                  Application is a reference to the application to be released in the managed namespace.
+                  Either application or componentGroup must be specified, but not both.
+                maxLength: 63
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               collectors:
@@ -1530,6 +1573,13 @@ spec:
                 required:
                 - items
                 type: object
+              componentGroup:
+                description: |-
+                  ComponentGroup is a reference to the component group to be released in the managed namespace.
+                  Either application or componentGroup must be specified, but not both.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               data:
                 description: Data is an unstructured key used for providing data for
                   the managed Release Pipeline
@@ -1539,6 +1589,13 @@ spec:
                 description: FinalPipeline contains all the information about the
                   final Pipeline
                 properties:
+                  maxRetries:
+                    description: |-
+                      MaxRetries sets the retry limit for the pipeline overriding the value in
+                      ReleaseServiceConfig when specified. When unset the ReleaseServiceConfig
+                      value is used and 0 disables retries for the pipeline.
+                    minimum: 0
+                    type: integer
                   params:
                     description: Params is a slice of parameters to be passed to the
                       Pipeline
@@ -1588,6 +1645,12 @@ spec:
                         description: Resolver is the name of a Tekton resolver to
                           be used (e.g. git)
                         type: string
+                      useEmptyDir:
+                        description: |-
+                          UseEmptyDir specifies whether to use an empty dir volume for the workspace.
+                          When true, the PipelineRun will use an empty dir volume. Otherwise, it will
+                          use a volume claim template by default.
+                        type: boolean
                     required:
                     - params
                     - resolver
@@ -1942,6 +2005,18 @@ spec:
                               description: HostNetwork specifies whether the pod may
                                 use the node network namespace
                               type: boolean
+                            hostUsers:
+                              description: |-
+                                HostUsers indicates whether the pod will use the host's user namespace.
+                                Optional: Default to true.
+                                If set to true or not present, the pod will be run in the host user namespace, useful
+                                for when the pod needs a feature only available to the host user namespace, such as
+                                loading a kernel module with CAP_SYS_MODULE.
+                                When set to false, a new user namespace is created for the pod. Setting false
+                                is useful to mitigating container breakout vulnerabilities such as allowing
+                                containers to run as root without their user having root privileges on the host.
+                                This field depends on the kubernetes feature gate UserNamespacesSupport being enabled.
+                              type: boolean
                             imagePullSecrets:
                               description: ImagePullSecrets gives the name of the
                                 secret used by the pod to pull the image if specified
@@ -2020,9 +2095,10 @@ spec:
                                   operator:
                                     description: |-
                                       Operator represents a key's relationship to the value.
-                                      Valid operators are Exists and Equal. Defaults to Equal.
+                                      Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                                       Exists is equivalent to wildcard for value, so that a pod can
                                       tolerate all taints of a particular category.
+                                      Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                                     type: string
                                   tolerationSeconds:
                                     description: |-
@@ -2421,6 +2497,13 @@ spec:
                 description: TenantPipeline contains all the information about the
                   tenant Pipeline
                 properties:
+                  maxRetries:
+                    description: |-
+                      MaxRetries sets the retry limit for the pipeline overriding the value in
+                      ReleaseServiceConfig when specified. When unset the ReleaseServiceConfig
+                      value is used and 0 disables retries for the pipeline.
+                    minimum: 0
+                    type: integer
                   params:
                     description: Params is a slice of parameters to be passed to the
                       Pipeline
@@ -2470,6 +2553,12 @@ spec:
                         description: Resolver is the name of a Tekton resolver to
                           be used (e.g. git)
                         type: string
+                      useEmptyDir:
+                        description: |-
+                          UseEmptyDir specifies whether to use an empty dir volume for the workspace.
+                          When true, the PipelineRun will use an empty dir volume. Otherwise, it will
+                          use a volume claim template by default.
+                        type: boolean
                     required:
                     - params
                     - resolver
@@ -2824,6 +2913,18 @@ spec:
                               description: HostNetwork specifies whether the pod may
                                 use the node network namespace
                               type: boolean
+                            hostUsers:
+                              description: |-
+                                HostUsers indicates whether the pod will use the host's user namespace.
+                                Optional: Default to true.
+                                If set to true or not present, the pod will be run in the host user namespace, useful
+                                for when the pod needs a feature only available to the host user namespace, such as
+                                loading a kernel module with CAP_SYS_MODULE.
+                                When set to false, a new user namespace is created for the pod. Setting false
+                                is useful to mitigating container breakout vulnerabilities such as allowing
+                                containers to run as root without their user having root privileges on the host.
+                                This field depends on the kubernetes feature gate UserNamespacesSupport being enabled.
+                              type: boolean
                             imagePullSecrets:
                               description: ImagePullSecrets gives the name of the
                                 secret used by the pod to pull the image if specified
@@ -2902,9 +3003,10 @@ spec:
                                   operator:
                                     description: |-
                                       Operator represents a key's relationship to the value.
-                                      Valid operators are Exists and Equal. Defaults to Equal.
+                                      Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                                       Exists is equivalent to wildcard for value, so that a pod can
                                       tolerate all taints of a particular category.
+                                      Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                                     type: string
                                   tolerationSeconds:
                                     description: |-
@@ -3289,9 +3391,10 @@ spec:
                 required:
                 - pipelineRef
                 type: object
-            required:
-            - application
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of application or componentGroup must be specified
+              rule: has(self.application) != has(self.componentGroup)
           status:
             description: ReleasePlanStatus defines the observed state of ReleasePlan.
             properties:
@@ -3893,6 +3996,149 @@ spec:
                       tasks
                     type: string
                 type: object
+              retryablePipelines:
+                description: RetryablePipelines is a list of pipelines that are safe
+                  to automatically retry on failure.
+                items:
+                  description: RetryablePipeline is a pipeline that is safe to automatically
+                    retry on failure.
+                  properties:
+                    pathInRepo:
+                      description: |-
+                        PathInRepo is the path within the git repository where the Pipeline definition
+                        can be found.
+                      type: string
+                    retryPolicy:
+                      description: RetryPolicy defines how and when the pipeline is
+                        retried after a failure.
+                      properties:
+                        disableOn:
+                          description: DisableOn defines conditions that disable automatic
+                            retries.
+                          properties:
+                            tags:
+                              description: |-
+                                Tags is a list of values which disable retries when present in the ReleasePlanAdmission
+                                mapping data.
+                              items:
+                                type: string
+                              type: array
+                          type: object
+                        maxRetries:
+                          description: MaxRetries is the maximum number of retries
+                            allowed for a pipeline.
+                          minimum: 0
+                          type: integer
+                        mitigations:
+                          description: Mitigations defines adjustment strategies to
+                            apply on retry based on failure type
+                          properties:
+                            oomKill:
+                              description: OOMKill defines adjustment for out-of-memory
+                                failures
+                              properties:
+                                maxComputeResources:
+                                  description: MaxComputeResources sets a upper limit
+                                    on resources across retries.
+                                  properties:
+                                    claims:
+                                      description: |-
+                                        Claims lists the names of resources, defined in spec.resourceClaims,
+                                        that are used by this container.
+
+                                        This field depends on the
+                                        DynamicResourceAllocation feature gate.
+
+                                        This field is immutable. It can only be set for containers.
+                                      items:
+                                        description: ResourceClaim references one
+                                          entry in PodSpec.ResourceClaims.
+                                        properties:
+                                          name:
+                                            description: |-
+                                              Name must match the name of one entry in pod.spec.resourceClaims of
+                                              the Pod where this field is used. It makes that resource available
+                                              inside a container.
+                                            type: string
+                                          request:
+                                            description: |-
+                                              Request is the name chosen for a request in the referenced claim.
+                                              If empty, everything from the claim is made available, otherwise
+                                              only the result of this request.
+                                            type: string
+                                        required:
+                                        - name
+                                        type: object
+                                      type: array
+                                      x-kubernetes-list-map-keys:
+                                      - name
+                                      x-kubernetes-list-type: map
+                                    limits:
+                                      additionalProperties:
+                                        anyOf:
+                                        - type: integer
+                                        - type: string
+                                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                        x-kubernetes-int-or-string: true
+                                      description: |-
+                                        Limits describes the maximum amount of compute resources allowed.
+                                        More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                                      type: object
+                                    requests:
+                                      additionalProperties:
+                                        anyOf:
+                                        - type: integer
+                                        - type: string
+                                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                        x-kubernetes-int-or-string: true
+                                      description: |-
+                                        Requests describes the minimum amount of compute resources required.
+                                        If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                        otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                        More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                                      type: object
+                                  type: object
+                                multiplier:
+                                  description: Multiplier is a factor used to multiply
+                                    memory limits on each retry
+                                  pattern: ^[0-9]+(\.[0-9]+)?$
+                                  type: string
+                              required:
+                              - multiplier
+                              type: object
+                            timeout:
+                              description: Timeout defines adjustment for timeout
+                                failures.
+                              properties:
+                                increment:
+                                  description: Increment is the duration to add to
+                                    the timeout on each retry.
+                                  type: string
+                                maxTimeout:
+                                  description: MaxTimeout is the maximum time allowed
+                                    across retries.
+                                  type: string
+                              required:
+                              - increment
+                              type: object
+                          type: object
+                      required:
+                      - maxRetries
+                      type: object
+                    revision:
+                      description: Revision is the git revision where the Pipeline
+                        definition can be found.
+                      type: string
+                    url:
+                      description: Url is the url to the git repo.
+                      type: string
+                  required:
+                  - pathInRepo
+                  - retryPolicy
+                  - revision
+                  - url
+                  type: object
+                type: array
             type: object
           status:
             description: ReleaseServiceConfigStatus defines the observed state of
@@ -4376,9 +4622,16 @@ metadata:
   name: release-service-tekton-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+- apiGroups:
   - tekton.dev
   resources:
   - pipelineruns
+  - taskruns
   verbs:
   - create
   - delete
@@ -4719,7 +4972,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: quay.io/konflux-ci/release-service:90fbc527e88e78719934dc7db2f69e14efcbab14
+        image: quay.io/konflux-ci/release-service:85b854720e65dcc95b3feb5b971f2decfd285e7b
         livenessProbe:
           httpGet:
             path: /healthz
