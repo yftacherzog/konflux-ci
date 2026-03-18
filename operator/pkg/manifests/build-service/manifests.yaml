@@ -86,10 +86,31 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
   - patch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -124,27 +145,6 @@ rules:
   - imagerepositories
   - imagerepositories/status
   - releaseplanadmissions
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  - secrets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - namespaces
   verbs:
   - get
   - list
@@ -364,7 +364,7 @@ spec:
         env:
         - name: PAC_WEBHOOK_URL
           value: http://pipelines-as-code-controller.pipelines-as-code.svc.cluster.local:8180
-        image: quay.io/konflux-ci/build-service:affd5b51b3d597ae73a84702e82da7df215915db
+        image: quay.io/konflux-ci/build-service:ca44d2b8386e0af3ce29d2dc2d639a4e8fae3199
         livenessProbe:
           httpGet:
             path: /healthz
