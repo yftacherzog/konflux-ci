@@ -14,6 +14,9 @@ Contributing Guidelines
   * [Prerequisites](#prerequisites)
   * [Setup](#setup)
   * [Running the test](#running-the-test)
+  * [Component overrides (local Kind)](#component-overrides-local-kind)
+  * [Kind image load list (`KIND_LOAD_IMAGES`)](#kind-image-load-list-kind_load_images)
+    + [Testing with a Quay image (no local segment-bridge build)](#testing-with-a-quay-image-no-local-segment-bridge-build)
 
 <!-- tocstop -->
 
@@ -94,7 +97,7 @@ and ARM64 architectures. There are **two test suites** in `test/go-tests`:
 - **E2E tests** (suite "Konflux E2E"): Full end-to-end flow (application, component,
   build, integration test, release). Requires cluster and E2E credentials. Copy
   `test/e2e/e2e.env.template` to `test/e2e/e2e.env`, fill in the values, then
-  source it and run (from repo root; no cd, repeat as needed): `source test/e2e/e2e.env` then `go -C test/go-tests test ./tests/conformance -v`
+  source it and run (from repo root): `source test/e2e/e2e.env` then `./test/e2e/run-e2e.sh`
   The E2E test code lives in `test/go-tests/tests/conformance/` and is maintained in this repo.
   The release-service-catalog revision is read from `test/e2e/release-service-catalog-revision` when not set in env (so your copy of `e2e.env` does not drift).
 
@@ -147,18 +150,123 @@ See `test/e2e/e2e.env.template` for all E2E variables and descriptions. You do n
 
 ## Running the test
 
-Deploy Konflux and test resources (in one terminal):
+Deploy Konflux (in one terminal):
 ```bash
 ./scripts/deploy-local.sh
-./deploy-test-resources.sh
 ```
 
 Run the E2E tests (source E2E env in the same terminal where you run the test, or in a second terminal). From repo root:
 ```bash
 source test/e2e/e2e.env
-go -C test/go-tests test ./tests/conformance -v
+./test/e2e/run-e2e.sh
 ```
+
+The script deploys test resources and runs the conformance suite.
 
 Note: The deploy step uses `scripts/deploy-local.env` (GitHub App, Quay for image-controller, Smee). The E2E step uses `test/e2e/e2e.env` (GitHub/Quay for E2E flows only). They are separate so you never load deploy secrets into the shell where you only run tests.
 
 The source code of the E2E tests is in this repo under `test/go-tests/tests/conformance/`.
+
+## Component overrides (local Kind)
+
+To deploy Konflux on Kind with a **custom component ref and/or container image** (e.g. your own build of `segment-bridge`), apply overrides **before** `./scripts/deploy-local.sh`. The helper script is `scripts/operator-e2e/apply-overrides-from-yaml.sh`; it needs `yq` and `jq` on your `PATH`.
+
+:gear: Prefer a YAML **file** via **`OVERRIDES_YAML_PATH`** (takes precedence over inline `OVERRIDES_YAML`). Paths are resolved from your **current working directory** unless absolute:
+
+```bash
+export OVERRIDES_YAML_PATH=./my-component-overrides.yaml
+```
+
+```bash
+bash scripts/operator-e2e/apply-overrides-from-yaml.sh "$(pwd)"
+```
+
+```bash
+./scripts/deploy-local.sh
+```
+
+Each list item needs **`name`**, **`git`** (array of rules; may be empty if you only override images), and **`images`** (array of `{ orig, replacement }`; may be empty if you only change git sources). **Per item**, at least one of `git` or `images` must be non-empty.
+
+Each **git** rule names the **`sourceRepo`** (`org/repo` or `https://github.com/org/repo`) that must match the GitHub URL in kustomize, then **either** **`remote: { repo, ref }`** (fork + any GitHub `?ref=` value: branch, tag, SHA) **or** **`localPath:`** (clone root; URL path suffixes are appended).
+
+First matching rule wins per resource URL. Multiple rules cover multiple upstream repos in the same component.
+
+```yaml
+- name: segment-bridge
+  git:
+    - sourceRepo: konflux-ci/segment-bridge
+      remote:
+        repo: https://github.com/yourfork/segment-bridge
+        ref: main
+  images:
+    - orig: quay.io/konflux-ci/segment-bridge
+      replacement: quay.io/yourorg/segment-bridge:your-tag
+```
+
+**Local clone** for that same upstream URL:
+
+```yaml
+- name: segment-bridge
+  git:
+    - sourceRepo: konflux-ci/segment-bridge
+      localPath: /home/you/src/segment-bridge
+  images:
+    - orig: quay.io/konflux-ci/segment-bridge
+      replacement: quay.io/yourorg/segment-bridge:your-tag
+```
+
+Alternatively, pass multiline YAML in **`OVERRIDES_YAML`** (used when `OVERRIDES_YAML_PATH` is unset). See `scripts/operator-e2e/README.md` and `docs/operator-e2e-environments.md` for the full script layout.
+
+## Kind image load list (`KIND_LOAD_IMAGES`)
+
+After the Kind cluster exists, `deploy-local.sh` can preload images from your local Docker/Podman store into the node (**Step 1b**). Set **`KIND_LOAD_IMAGES`** in `scripts/deploy-local.env` to a space- or comma-separated list. Each entry must match an **`images[].replacement`** in your overrides exactly (so the cluster uses the preloaded image).
+
+### Testing with a Quay image (no local segment-bridge build)
+
+Use a digest or tag that exists on Quay, retag to any name you like, load it via the env list, and point overrides at that name.
+
+:gear: Pull and tag (Docker example; use `podman` the same way if you use Podman end-to-end):
+
+```bash
+docker pull quay.io/konflux-ci/segment-bridge@sha256:YOUR_DIGEST
+```
+
+```bash
+docker tag quay.io/konflux-ci/segment-bridge@sha256:YOUR_DIGEST dev.local/segment-bridge:mytest
+```
+
+:gear: In `scripts/deploy-local.env`, set (same reference you tagged):
+
+```bash
+KIND_LOAD_IMAGES="dev.local/segment-bridge:mytest"
+```
+
+:gear: Overrides file must use the **same** `images[].replacement` and a **`remote.ref`** that exists for that repo (e.g. the commit that produced the image, or a branch):
+
+```yaml
+- name: segment-bridge
+  git:
+    - sourceRepo: konflux-ci/segment-bridge
+      remote:
+        repo: https://github.com/konflux-ci/segment-bridge
+        ref: COMMIT_SHA_MATCHING_MANIFESTS_OR_IMAGE
+  images:
+    - orig: quay.io/konflux-ci/segment-bridge
+      replacement: dev.local/segment-bridge:mytest
+```
+
+:gear: Apply overrides, then deploy (from konflux-ci repo root):
+
+```bash
+export OVERRIDES_YAML_PATH=/path/to/overrides.yaml
+```
+
+```bash
+bash scripts/operator-e2e/apply-overrides-from-yaml.sh "$(pwd)"
+```
+
+```bash
+./scripts/deploy-local.sh
+```
+
+See comments in `scripts/deploy-local.env.template` for more examples.

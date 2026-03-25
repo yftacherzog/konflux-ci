@@ -1,0 +1,55 @@
+# Deploy Konflux on Kind (deploy-local.sh), restore operator manifests if overrides were applied, verify cluster CLI.
+# Required env: GITHUB_APP_ID, GITHUB_PRIVATE_KEY, WEBHOOK_SECRET, QUAY_TOKEN, QUAY_ORGANIZATION, SMEE_CHANNEL.
+#
+name: 'Operator E2E — deploy'
+description: 'Optional ref/image overrides, deploy-local.sh, kubectl/kind sanity checks.'
+inputs:
+  konflux-repo-root:
+    description: 'Absolute path to konflux-ci repository root.'
+    required: true
+  overrides:
+    description: 'Optional YAML: per item {name, git:[{sourceRepo, remote|localPath}], images:[{orig, replacement}]}'
+    required: false
+    default: ''
+  konflux-ready-timeout:
+    description: 'Max time to wait for Konflux CR Ready (e.g. 15m, 30m).'
+    required: false
+    default: '15m'
+  kind-cluster:
+    description: 'Kind cluster name passed to deploy-local.sh.'
+    required: false
+    default: 'konflux-operator-e2e'
+  konflux-cr:
+    description: 'Path relative to repo root for Konflux CR manifest.'
+    required: false
+    default: 'operator/config/samples/konflux-e2e.yaml'
+runs:
+  using: 'composite'
+  steps:
+    - name: Apply ref and image overrides
+      if: ${{ inputs.overrides != '' }}
+      shell: bash
+      env:
+        OVERRIDES_YAML: ${{ inputs.overrides }}
+        KONFLUX_READY_TIMEOUT: ${{ inputs.konflux-ready-timeout }}
+      run: bash "${{ inputs.konflux-repo-root }}/scripts/operator-e2e/apply-overrides-from-yaml.sh" "${{ inputs.konflux-repo-root }}"
+
+    - name: Deploy Konflux using deploy-local.sh
+      shell: bash
+      working-directory: ${{ inputs.konflux-repo-root }}
+      env:
+        KIND_CLUSTER: ${{ inputs.kind-cluster }}
+        OPERATOR_INSTALL_METHOD: build
+        KONFLUX_CR: ${{ inputs.konflux-cr }}
+        KONFLUX_READY_TIMEOUT: ${{ inputs.konflux-ready-timeout }}
+        GITHUB_APP_ID: ${{ env.GITHUB_APP_ID }}
+        GITHUB_PRIVATE_KEY: ${{ env.GITHUB_PRIVATE_KEY }}
+        WEBHOOK_SECRET: ${{ env.WEBHOOK_SECRET }}
+        QUAY_TOKEN: ${{ env.QUAY_TOKEN }}
+        QUAY_ORGANIZATION: ${{ env.QUAY_ORGANIZATION }}
+        SMEE_CHANNEL: ${{ env.SMEE_CHANNEL }}
+      run: ./scripts/deploy-local.sh
+
+    - name: Post-deploy sanity (kubectl / kind / namespaces)
+      shell: bash
+      run: bash "${{ inputs.konflux-repo-root }}/scripts/operator-e2e/post-deploy-sanity.sh" "${{ inputs.konflux-repo-root }}"

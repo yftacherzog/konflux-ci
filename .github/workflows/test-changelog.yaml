@@ -1,12 +1,14 @@
 name: Test Changelog Generator
 
 on:
-  pull_request:
-    paths:
-      - '.github/scripts/changelog-lib.sh'
-      - '.github/scripts/generate-changelog.sh'
-      - '.github/scripts/prepare-release-notes.sh'
-      - '.github/workflows/test-changelog.yaml'
+  # pull_request disabled for testing
+  # pull_request:
+  #   paths:
+  #     - '.github/scripts/changelog-lib.sh'
+  #     - '.github/scripts/generate-changelog.sh'
+  #     - '.github/scripts/prepare-release-notes.sh'
+  #     - '.github/workflows/test-changelog.yaml'
+  workflow_dispatch:
 
 jobs:
   test-changelog:

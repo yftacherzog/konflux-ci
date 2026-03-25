@@ -1,7 +1,7 @@
 ---
 title: "Authentication and OIDC Configuration"
 linkTitle: "Authentication and OIDC Configuration"
-weight: 5
+weight: 4
 description: "Configuring login providers for Konflux using Dex connectors - GitHub, OpenShift, OIDC, LDAP, and static passwords."
 ---
 
@@ -336,7 +336,3 @@ Dex supports many more upstream providers including Bitbucket Cloud, GitLab, SAM
 LinkedIn, Microsoft, and more. For the full list of available connectors and their
 configuration options, refer to the
 [Dex connectors documentation](https://dexidp.io/docs/connectors/).
-
-## What's Next
-
-- [Troubleshooting]({{< relref "../troubleshooting" >}}) - solutions to common issues encountered when running Konflux.
