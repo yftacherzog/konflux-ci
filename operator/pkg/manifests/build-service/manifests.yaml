@@ -16,6 +16,14 @@ metadata:
   name: build-service-controller-manager
   namespace: build-service
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: metrics-reader
+  namespace: build-service
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -267,6 +275,18 @@ rules:
   - create
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: build-service-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: build-pipeline-config-read-only-binding
@@ -339,6 +359,21 @@ subjects:
   name: build-service-controller-manager
   namespace: build-service
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: prometheus-build-service-metrics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: build-service-metrics-reader
+subjects:
+- kind: ServiceAccount
+  name: metrics-reader
+  namespace: build-service
+---
 apiVersion: v1
 data:
   config.yaml: |
@@ -361,6 +396,16 @@ kind: ConfigMap
 metadata:
   name: build-pipeline-config
   namespace: build-service
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    kubernetes.io/service-account.name: metrics-reader
+  name: metrics-reader
+  namespace: build-service
+type: kubernetes.io/service-account-token
 ---
 apiVersion: v1
 kind: Service
@@ -470,6 +515,28 @@ spec:
           name: webhook-config
           optional: true
         name: webhook-config
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: build-service
+  namespace: build-service
+spec:
+  endpoints:
+  - bearerTokenSecret:
+      key: token
+      name: metrics-reader
+    interval: 15s
+    path: /metrics
+    port: https
+    scheme: https
+    tlsConfig:
+      insecureSkipVerify: true
+  selector:
+    matchLabels:
+      control-plane: controller-manager
 ---
 allowHostDirVolumePlugin: false
 allowHostIPC: false

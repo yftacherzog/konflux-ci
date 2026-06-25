@@ -321,6 +321,7 @@ rules:
   - build-pipeline-runner-rolebinding
   - build-service-manager-rolebinding
   - build-service-metrics-auth-rolebinding
+  - prometheus-build-service-metrics-reader
   resources:
   - clusterrolebindings
   verbs:
@@ -351,6 +352,7 @@ rules:
   - integration-service-metrics-auth-rolebinding
   - integration-service-snapshot-garbage-collector
   - integration-service-tekton-role-binding
+  - prometheus-integration-service-metrics-reader
   resources:
   - clusterrolebindings
   verbs:
@@ -407,6 +409,7 @@ rules:
   - appstudio-pipelines-runner
   - build-service-manager-role
   - build-service-metrics-auth-role
+  - build-service-metrics-reader
   resources:
   - clusterroles
   verbs:
@@ -453,6 +456,7 @@ rules:
   - integration-service-integrationtestscenario-viewer-role
   - integration-service-manager-role
   - integration-service-metrics-auth-role
+  - integration-service-metrics-reader
   - integration-service-snapshot-garbage-collector
   - integration-service-tekton-editor-role
   - konflux-integration-runner

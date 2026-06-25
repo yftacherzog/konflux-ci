@@ -78,6 +78,8 @@ fi
   # shellcheck disable=SC2086
   go test . ./pkg/... ${E2E_INTEGRATION_GO_TEST_EXTRA_ARGS:-}
 )
+# Metrics integration tests require the in-cluster Konflux operator (make deploy).
+# Tekton runs bin/manager only in the deploy Task pod; see scripts/operator-e2e/README.md.
 eval "$(bash scripts/operator-e2e/prepare-conformance-env.sh "${REPO_ROOT}")"
 export GITHUB_TOKEN="${GH_TOKEN:-}"
 export MY_GITHUB_ORG="${GH_ORG:-}"

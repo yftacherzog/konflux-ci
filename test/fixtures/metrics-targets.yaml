@@ -1,0 +1,44 @@
+# Metrics scrape targets for cluster integration tests.
+scraper:
+  namespace: konflux-monitoring-test
+  serviceAccount: prometheus
+
+targets:
+  - id: konflux-operator
+    namespace: konflux-operator
+    service: konflux-operator-controller-manager-metrics-service
+    scheme: https
+    portName: https
+    port: 8443
+    path: /metrics
+    tlsInsecureSkipVerify: true
+    metricsReaderClusterRole: konflux-operator-metrics-reader
+    bodyMustMatchAny:
+      - workqueue_
+      - controller_runtime_
+      - go_gc_
+  - id: build-service
+    namespace: build-service
+    service: build-service-controller-manager-metrics-service
+    scheme: https
+    portName: https
+    port: 8443
+    path: /metrics
+    tlsInsecureSkipVerify: true
+    metricsReaderClusterRole: build-service-metrics-reader
+    bodyMustMatchAny:
+      - workqueue_
+      - controller_runtime_
+      - go_gc_
+  - id: integration-service
+    namespace: integration-service
+    service: integration-service-controller-manager-metrics-service
+    scheme: http
+    portName: http
+    port: 8080
+    path: /metrics
+    metricsReaderClusterRole: integration-service-metrics-reader
+    bodyMustMatchAny:
+      - workqueue_
+      - controller_runtime_
+      - go_gc_

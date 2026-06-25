@@ -109,8 +109,8 @@ type KonfluxBuildServiceReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,resourceNames=build-service-leader-election-role,verbs=bind;escalate
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=build-pipeline-config-read-only-binding;build-service-leader-election-rolebinding,verbs=bind
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=appstudio-pipelines-runner;build-service-manager-role;build-service-metrics-auth-role,verbs=bind;escalate
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=build-pipeline-runner-rolebinding;build-service-manager-rolebinding;build-service-metrics-auth-rolebinding,verbs=bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=appstudio-pipelines-runner;build-service-manager-role;build-service-metrics-auth-role;build-service-metrics-reader,verbs=bind;escalate
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=build-pipeline-runner-rolebinding;build-service-manager-rolebinding;build-service-metrics-auth-rolebinding;prometheus-build-service-metrics-reader,verbs=bind
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=get;list;watch;create;patch

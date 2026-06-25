@@ -12,6 +12,19 @@ With `OPERATOR_INSTALL_METHOD=none`, `tekton-deploy-operator-and-wait.sh` starts
 
 For the full pipeline narrative, see **Scope** in `.tekton/pipelines/operator-e2e/README.md`.
 
+## Metrics integration tests
+
+`run-metrics-integration-tests.sh` runs `test/go-tests/metricsintegration` against a live cluster (port-forward + bearer token, Prometheus-style).
+
+| Entry point | Runs metrics tests? | Why |
+|-------------|---------------------|-----|
+| `test/e2e/run-e2e.sh` (GHA Kind) | **Yes** | Operator is deployed in-cluster via `make deploy` |
+| `tekton-run-e2e-tests.sh` | **No** | Deploy Task runs `bin/manager` OOC; operator metrics Service has no endpoints during the test Task |
+
+Component metrics (build-service, integration-service) can run on Tekton once a separate Task-scoped suite is added; today the catalog is exercised from GHA/local only.
+
+Catalog: `test/fixtures/metrics-targets.yaml`. Scraper RBAC fixture: `test/fixtures/metrics-scraper/rbac.yaml`.
+
 ## Extra `go test` arguments (integration / conformance)
 
 The Tekton Task sets optional env vars from pipeline params (empty by default). Scripts **omit quotes** around those expansions on purpose: the shell must **split on spaces** so each flag becomes its own argument to `go test`. (Shellcheck rule SC2086 is disabled next to those lines because unquoted expansion is usually risky; here it is required for the same reason as forwarding `"$@"`.)
