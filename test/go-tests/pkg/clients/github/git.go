@@ -18,6 +18,23 @@ func (c *Client) DeleteRef(ctx context.Context, repository, branchName string) e
 	return nil
 }
 
+// CreateBranchAtSHA creates a new branch pointing at the given commit.
+func (c *Client) CreateBranchAtSHA(repository, sha, newBranchName string) error {
+	if sha == "" {
+		return fmt.Errorf("sha is required to create branch '%s' in repo '%s'", newBranchName, repository)
+	}
+	ctx := context.Background()
+	newRef := github.CreateRef{
+		Ref: fmt.Sprintf(HEADS, newBranchName),
+		SHA: sha,
+	}
+	_, _, err := c.client.Git.CreateRef(ctx, c.organization, repository, newRef)
+	if err != nil {
+		return fmt.Errorf("error when creating branch '%s' at %s for repo '%s': %+v", newBranchName, sha, repository, err)
+	}
+	return c.waitForRef(repository, newBranchName)
+}
+
 // CreateRef creates a new ref (GitHub branch) in a specified GitHub repository,
 // that will be based on the commit specified with sha. If sha is not specified
 // the latest commit from base branch will be used.
@@ -42,13 +59,17 @@ func (c *Client) CreateRef(repository, baseBranchName, sha, newBranchName string
 	if err != nil {
 		return fmt.Errorf("error when creating a new branch '%s' for the repo '%s': %+v", newBranchName, repository, err)
 	}
-	err = utils.WaitUntilWithInterval(func() (done bool, err error) {
-		exist, err := c.ExistsRef(repository, newBranchName)
+	return c.waitForRef(repository, newBranchName)
+}
+
+func (c *Client) waitForRef(repository, branchName string) error {
+	err := utils.WaitUntilWithInterval(func() (done bool, err error) {
+		exist, err := c.ExistsRef(repository, branchName)
 		if err != nil {
 			return false, err
 		}
-		if exist && err == nil {
-			return exist, err
+		if exist {
+			return true, nil
 		}
 		return false, nil
 	}, 2*time.Second, 2*time.Minute) //Wait for the branch to actually exist
